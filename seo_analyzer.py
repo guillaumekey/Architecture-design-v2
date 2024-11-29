@@ -340,4 +340,4 @@ if __name__ == "__main__":
     
     **Configuration des exclusions :**  
     ⚠️ Important : Pour de meilleurs résultats, évitez d'utiliser des termes d'exclusion différents sur plusieurs niveaux de directory (dir_1, dir_2, dir_3).
-    """)ggg
+    """)
