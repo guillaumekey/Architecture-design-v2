@@ -14,8 +14,6 @@ if 'url_df' not in st.session_state:
     st.session_state.url_df = pd.DataFrame()
 if 'directories_df' not in st.session_state:
     st.session_state.directories_df = pd.DataFrame()
-if 'traffic_df' not in st.session_state:
-    st.session_state.traffic_df = pd.DataFrame()
 if 'analysis_done' not in st.session_state:
     st.session_state.analysis_done = False
 if 'treemap_fig' not in st.session_state:
@@ -164,16 +162,10 @@ def analyze_website(url, custom_sitemap='', max_categories=-1, show_single_items
         if max_categories > 0:
             top_categories = top_categories.head(max_categories)
 
+        # Création du DataFrame final
         st.session_state.directories_df = st.session_state.url_df[
             st.session_state.url_df['dir_1'].isin(top_categories.index)
         ][['dominio', 'dir_1', 'dir_2', 'dir_3', 'url']]
-
-        # Mise à jour des données de trafic
-        if not st.session_state.traffic_df.empty:
-            st.session_state.directories_df = st.session_state.directories_df.merge(
-                st.session_state.traffic_df, on='url', how='left')
-            for col in ['clicks', 'impressions', 'ctr', 'position']:
-                st.session_state.directories_df[col] = st.session_state.directories_df[col].fillna(0)
 
         # Création du treemap
         today = datetime.datetime.utcnow().strftime('%B %d, %Y')
@@ -228,14 +220,6 @@ with col3:
         "Exclusions niveau 3 (dir_3)",
         help="Catégories à exclure au niveau 3 (séparées par des virgules)"
     )
-
-# Upload de fichiers
-gsc_file = st.file_uploader("Importer données Google Search Console (CSV)", type=['csv'])
-
-# Traitement des fichiers uploadés
-if gsc_file:
-    st.session_state.traffic_df = pd.read_csv(gsc_file)
-    st.session_state.traffic_df.columns = ['url', 'clicks', 'impressions', 'ctr', 'position']
 
 # Bouton d'analyse
 if st.button("Analyser le site"):
@@ -329,15 +313,14 @@ if __name__ == "__main__":
     - Visualisation treemap
     - Filtrage par niveau
     - Exclusion par niveau
-    - Intégration GSC
-    
+
     #### Guide d'usage des filtres :
-    
+
     **Nombre max de catégories :**  
     Limite le nombre de catégories dir_1 à afficher dans l'analyse.  
     Les catégories sont classées par ordre décroissant du nombre d'URLs.  
     `-1` = afficher toutes les catégories.
-    
-    **Configuration des exclusions**  
+
+    **Configuration des exclusions :**  
     ⚠️ Important : Pour de meilleurs résultats, évitez d'utiliser des termes d'exclusion différents sur plusieurs niveaux de directory (dir_1, dir_2, dir_3).
     """)
