@@ -29,6 +29,55 @@ if 'num_semrush_files' not in st.session_state:
     st.session_state.num_semrush_files = 2
 
 
+def prepare_semrush_data(df):
+    """Agrège les données SEMrush par URL, marché et type de position."""
+    if df.empty:
+        return pd.DataFrame()
+
+    logger.info("Préparation des données SEMrush")
+
+    # Grouper par URL, marché et type de position
+    grouped = df.groupby(['URL', 'market', 'Position Type']).agg({
+        'Traffic': 'sum',
+        'Search Volume': 'sum',
+        'Keyword': 'count'  # Compte le nombre de mots clés (lignes) par URL
+    }).reset_index()
+
+    # Renommer la colonne pour plus de clarté
+    grouped = grouped.rename(columns={'Keyword': 'Number of Keywords'})
+
+    logger.info(f"Données préparées : {len(grouped)} lignes")
+    return grouped
+
+
+def create_main_dataframe(sitemap_df, semrush_df):
+    """Crée le dataframe principal avec jointure sitemap et SEMrush."""
+    logger.info("Création du main dataframe")
+
+    # Préparation des données SEMrush
+    semrush_prepared = prepare_semrush_data(semrush_df)
+
+    if semrush_prepared.empty:
+        logger.warning("Pas de données SEMrush disponibles")
+        return pd.DataFrame(), pd.DataFrame()
+
+    # Jointure avec les données du sitemap
+    main_df = sitemap_df.merge(
+        semrush_prepared,
+        left_on='url',
+        right_on='URL',
+        how='right'  # Pour garder toutes les URLs de SEMrush
+    )
+
+    # Identification des URLs non présentes dans le sitemap
+    urls_not_in_sitemap = main_df[main_df['dominio'].isna()].copy()
+    urls_in_sitemap = main_df[main_df['dominio'].notna()].copy()
+
+    logger.info(f"URLs trouvées dans SEMrush mais pas dans le sitemap : {len(urls_not_in_sitemap)}")
+
+    return urls_in_sitemap, urls_not_in_sitemap
+
+
 def process_semrush_files(files, markets):
     """Traite les fichiers SEMrush uploadés et les combine en un seul DataFrame."""
     logger.info("Début du traitement des fichiers SEMrush")
@@ -199,7 +248,6 @@ def analyze_website(url, custom_sitemap='', max_categories=-1, show_single_items
         return None
 
     with st.spinner('Analyse des URLs...'):
-        logger.info("Début de l'analyse détaillée des URLs")
         st.session_state.url_df = adv.url_to_df(urls_df['loc'].dropna().tolist())
         st.session_state.url_df['dominio'] = domain
 
@@ -242,7 +290,6 @@ def analyze_website(url, custom_sitemap='', max_categories=-1, show_single_items
         st.session_state.directories_df = st.session_state.url_df[
             st.session_state.url_df['dir_1'].isin(top_categories.index)
         ][['dominio', 'dir_1', 'dir_2', 'dir_3', 'url']]
-        logger.info(f"DataFrame final créé avec {len(st.session_state.directories_df)} URLs")
 
         # Création du treemap
         today = datetime.datetime.utcnow().strftime('%B %d, %Y')
@@ -287,187 +334,200 @@ selected_markets = []
 for i in range(st.session_state.num_semrush_files):
     col1, col2 = st.columns([3, 1])
     with col1:
-        file = st.file_uploader(f"Fichier SEMrush #{i+1}", type=['csv'], key=f"semrush_file_{i}")
+        file = st.file_uploader(f"Fichier SEMrush #{i + 1}", type=['csv'], key=f"semrush_file_{i}")
         semrush_files.append(file)
     with col2:
         market = st.selectbox("Marché", markets, key=f"market_{i}")
         selected_markets.append(market)
 
 if st.session_state.num_semrush_files < 6:
-    # Ajout d'une clé unique pour le bouton
     if st.button("+ Ajouter un fichier", key="add_semrush_file_btn"):
         st.session_state.num_semrush_files += 1
         st.rerun()
 
-    # Section des exclusions
-    st.subheader("Configuration des exclusions")
-    col1, col2, col3 = st.columns(3)
+# Section des exclusions
+st.subheader("Configuration des exclusions")
+col1, col2, col3 = st.columns(3)
 
-    with col1:
-        exclude_dir1 = st.text_input(
-            "Exclusions niveau 1 (dir_1)",
-            help="Catégories à exclure au niveau 1 (séparées par des virgules)"
+with col1:
+    exclude_dir1 = st.text_input(
+        "Exclusions niveau 1 (dir_1)",
+        help="Catégories à exclure au niveau 1 (séparées par des virgules)"
+    )
+
+with col2:
+    exclude_dir2 = st.text_input(
+        "Exclusions niveau 2 (dir_2)",
+        help="Catégories à exclure au niveau 2 (séparées par des virgules)"
+    )
+
+with col3:
+    exclude_dir3 = st.text_input(
+        "Exclusions niveau 3 (dir_3)",
+        help="Catégories à exclure au niveau 3 (séparées par des virgules)"
+    )
+
+# Bouton d'analyse
+if st.button("Analyser le site"):
+    if url:
+        # Traitement des fichiers SEMrush
+        logger.info("Début du traitement global")
+        semrush_df = process_semrush_files(semrush_files, selected_markets)
+        if not semrush_df.empty:
+            st.session_state.semrush_data = semrush_df
+            logger.info(f"Données SEMrush traitées: {len(semrush_df)} lignes")
+
+        exclusions = {
+            'dir_1': clean_exclusions(exclude_dir1),
+            'dir_2': clean_exclusions(exclude_dir2),
+            'dir_3': clean_exclusions(exclude_dir3)
+        }
+
+        # Affichage des exclusions actives
+        active_exclusions = {level: terms for level, terms in exclusions.items() if terms}
+        if active_exclusions:
+            logger.info(f"Exclusions actives: {active_exclusions}")
+            st.info("Exclusions actives:")
+            for level, terms in active_exclusions.items():
+                st.write(f"- {level}: {', '.join(terms)}")
+
+        analyze_website(url, custom_sitemap, max_categories, show_single_items, exclusions)
+    else:
+        logger.error("URL non fournie")
+        st.error("Veuillez entrer une URL valide")
+
+# Affichage des résultats
+if st.session_state.analysis_done:
+    # Treemap
+    st.plotly_chart(st.session_state.treemap_fig, use_container_width=True)
+
+    # Filtres dans un conteneur horizontal
+    st.write("### Filtres de navigation")
+    cols = st.columns(3)
+    with cols[0]:
+        categories = ['Toutes'] + sorted(st.session_state.directories_df['dir_1'].unique())
+        selected_category = st.selectbox("Sélectionner une catégorie", categories)
+
+    with cols[1]:
+        subcategories = ['Toutes']
+        if selected_category != 'Toutes':
+            subcategories += sorted(
+                st.session_state.directories_df[
+                    st.session_state.directories_df['dir_1'] == selected_category
+                    ]['dir_2'].unique().tolist()
+            )
+        selected_subcategory = st.selectbox("Sélectionner une sous-catégorie", subcategories)
+
+    with cols[2]:
+        subsubcategories = ['Toutes']
+        if selected_subcategory != 'Toutes' and selected_category != 'Toutes':
+            subsubcategories += sorted(
+                st.session_state.directories_df[
+                    (st.session_state.directories_df['dir_1'] == selected_category) &
+                    (st.session_state.directories_df['dir_2'] == selected_subcategory)
+                    ]['dir_3'].unique().tolist()
+            )
+        selected_subsubcategory = st.selectbox("Sélectionner une sous-sous-catégorie", subsubcategories)
+
+    # Statistiques en dehors des colonnes
+    st.markdown("### Statistiques des URLs")
+    # Création d'un conteneur pour les métriques
+    with st.container():
+        # Utilisation d'une grille de colonnes égales
+        metrics_cols = st.columns([1, 1, 1, 1])
+        stats = get_url_statistics(selected_category, selected_subcategory, selected_subsubcategory)
+
+        # Application des métriques de manière centrée
+        metrics_cols[0].metric(
+            label="URLs Totales",
+            value=stats['total'],
+            help="Nombre total d'URLs dans le sitemap"
         )
 
-    with col2:
-        exclude_dir2 = st.text_input(
-            "Exclusions niveau 2 (dir_2)",
-            help="Catégories à exclure au niveau 2 (séparées par des virgules)"
+        metrics_cols[1].metric(
+            label=f"URLs {stats['dir1'][0]}" if stats['dir1'][0] != '-' else "URLs Dir_1",
+            value=stats['dir1'][1],
+            help="Nombre d'URLs dans la catégorie sélectionnée"
         )
 
-    with col3:
-        exclude_dir3 = st.text_input(
-            "Exclusions niveau 3 (dir_3)",
-            help="Catégories à exclure au niveau 3 (séparées par des virgules)"
+        metrics_cols[2].metric(
+            label=f"URLs {stats['dir2'][0]}" if stats['dir2'][0] != '-' else "URLs Dir_2",
+            value=stats['dir2'][1],
+            help="Nombre d'URLs dans la sous-catégorie sélectionnée"
         )
 
-    # Bouton d'analyse
-    if st.button("Analyser le site"):
-        if url:
-            # Traitement des fichiers SEMrush
-            logger.info("Début du traitement global")
-            semrush_df = process_semrush_files(semrush_files, selected_markets)
-            if not semrush_df.empty:
-                st.session_state.semrush_data = semrush_df
-                logger.info(f"Données SEMrush traitées: {len(semrush_df)} lignes")
-
-            exclusions = {
-                'dir_1': clean_exclusions(exclude_dir1),
-                'dir_2': clean_exclusions(exclude_dir2),
-                'dir_3': clean_exclusions(exclude_dir3)
-            }
-
-            # Affichage des exclusions actives
-            active_exclusions = {level: terms for level, terms in exclusions.items() if terms}
-            if active_exclusions:
-                logger.info(f"Exclusions actives: {active_exclusions}")
-                st.info("Exclusions actives:")
-                for level, terms in active_exclusions.items():
-                    st.write(f"- {level}: {', '.join(terms)}")
-
-            analyze_website(url, custom_sitemap, max_categories, show_single_items, exclusions)
-        else:
-            logger.error("URL non fournie")
-            st.error("Veuillez entrer une URL valide")
-
-    # Affichage des résultats
-    if st.session_state.analysis_done:
-        # Treemap
-        st.plotly_chart(st.session_state.treemap_fig, use_container_width=True)
-
-        # Filtres dans un conteneur horizontal
-        st.write("### Filtres de navigation")
-        cols = st.columns(3)
-        with cols[0]:
-            categories = ['Toutes'] + sorted(st.session_state.directories_df['dir_1'].unique())
-            selected_category = st.selectbox("Sélectionner une catégorie", categories)
-
-        with cols[1]:
-            subcategories = ['Toutes']
-            if selected_category != 'Toutes':
-                subcategories += sorted(
-                    st.session_state.directories_df[
-                        st.session_state.directories_df['dir_1'] == selected_category
-                        ]['dir_2'].unique().tolist()
-                )
-            selected_subcategory = st.selectbox("Sélectionner une sous-catégorie", subcategories)
-
-        with cols[2]:
-            subsubcategories = ['Toutes']
-            if selected_subcategory != 'Toutes' and selected_category != 'Toutes':
-                subsubcategories += sorted(
-                    st.session_state.directories_df[
-                        (st.session_state.directories_df['dir_1'] == selected_category) &
-                        (st.session_state.directories_df['dir_2'] == selected_subcategory)
-                        ]['dir_3'].unique().tolist()
-                )
-            selected_subsubcategory = st.selectbox("Sélectionner une sous-sous-catégorie", subsubcategories)
-
-        # Statistiques en dehors des colonnes
-        st.markdown("### Statistiques des URLs")
-        # Création d'un conteneur pour les métriques
-        with st.container():
-            # Utilisation d'une grille de colonnes égales
-            metrics_cols = st.columns([1, 1, 1, 1])
-            stats = get_url_statistics(selected_category, selected_subcategory, selected_subsubcategory)
-
-            # Application des métriques de manière centrée
-            metrics_cols[0].metric(
-                label="URLs Totales",
-                value=stats['total'],
-                help="Nombre total d'URLs dans le sitemap"
-            )
-
-            metrics_cols[1].metric(
-                label=f"URLs {stats['dir1'][0]}" if stats['dir1'][0] != '-' else "URLs Dir_1",
-                value=stats['dir1'][1],
-                help="Nombre d'URLs dans la catégorie sélectionnée"
-            )
-
-            metrics_cols[2].metric(
-                label=f"URLs {stats['dir2'][0]}" if stats['dir2'][0] != '-' else "URLs Dir_2",
-                value=stats['dir2'][1],
-                help="Nombre d'URLs dans la sous-catégorie sélectionnée"
-            )
-
-            metrics_cols[3].metric(
-                label=f"URLs {stats['dir3'][0]}" if stats['dir3'][0] != '-' else "URLs Dir_3",
-                value=stats['dir3'][1],
-                help="Nombre d'URLs dans la sous-sous-catégorie sélectionnée"
-            )
-
-        # Tableau en pleine largeur
-        filtered_df = filter_and_display_urls(selected_category, selected_subcategory, selected_subsubcategory)
-        st.dataframe(
-            filtered_df,
-            use_container_width=True,
-            column_config={
-                "dominio": st.column_config.TextColumn("Domaine", width=150),
-                "dir_1": st.column_config.TextColumn("Dir_1", width=100),
-                "dir_2": st.column_config.TextColumn("Dir_2", width=100),
-                "dir_3": st.column_config.TextColumn("Dir_3", width=100),
-                "url": st.column_config.TextColumn("URL", width=None),
-            }
+        metrics_cols[3].metric(
+            label=f"URLs {stats['dir3'][0]}" if stats['dir3'][0] != '-' else "URLs Dir_3",
+            value=stats['dir3'][1],
+            help="Nombre d'URLs dans la sous-sous-catégorie sélectionnée"
         )
 
-        # Données SEMrush en pleine largeur également
-        if not st.session_state.semrush_data.empty:
-            st.markdown("### Statistiques SEM Rush")
+    # Tableau en pleine largeur
+    filtered_df = filter_and_display_urls(selected_category, selected_subcategory, selected_subsubcategory)
+    st.dataframe(
+        filtered_df,
+        use_container_width=True,
+        column_config={
+            "dominio": st.column_config.TextColumn("Domaine", width=150),
+            "dir_1": st.column_config.TextColumn("Dir_1", width=100),
+            "dir_2": st.column_config.TextColumn("Dir_2", width=100),
+            "dir_3": st.column_config.TextColumn("Dir_3", width=100),
+            "url": st.column_config.TextColumn("URL", width=None),
+        }
+    )
+
+    # Données SEMrush en pleine largeur également
+    if not st.session_state.semrush_data.empty:
+        st.markdown("### Statistiques SEM Rush")
+        st.dataframe(st.session_state.semrush_data, use_container_width=True)
+
+        # Création et affichage du main dataframe
+        st.markdown("### Statistiques URLs SEM Rush")
+        urls_in_sitemap, urls_not_in_sitemap = create_main_dataframe(
+            st.session_state.directories_df,
+            st.session_state.semrush_data
+        )
+
+        if not urls_in_sitemap.empty:
             st.dataframe(
-                st.session_state.semrush_data,
-                use_container_width=True,
-                column_config={
-                    "market": st.column_config.TextColumn("Marché", width=80),
-                    "Keyword": st.column_config.TextColumn("Mot-clé", width=200),
-                    "Position": st.column_config.NumberColumn("Position", width=80),
-                    "Search Volume": st.column_config.NumberColumn("Volume", width=100),
-                    "URL": st.column_config.TextColumn("URL", width=None),
-                    "Traffic": st.column_config.NumberColumn("Trafic", width=100),
-                    "Traffic (%)": st.column_config.NumberColumn("Trafic %", width=100),
-                    "Traffic Cost": st.column_config.NumberColumn("Coût trafic", width=120),
-                    "Keyword Difficulty": st.column_config.NumberColumn("Difficulté", width=100)
-                }
+                urls_in_sitemap[[
+                    'url', 'dir_1', 'dir_2', 'dir_3', 'Traffic',
+                    'Number of Keywords', 'market', 'Search Volume',
+                    'Position Type'
+                ]],
+                use_container_width=True
             )
 
-    if __name__ == "__main__":
-        st.sidebar.markdown("""
-        ### À propos
-        Cette application analyse la structure des URLs d'un site web à partir de son sitemap.
+        # Affichage des URLs non présentes dans le sitemap
+        if not urls_not_in_sitemap.empty:
+            st.markdown("### URLs présentes dans SEMrush mais absentes du sitemap")
+            st.dataframe(
+                urls_not_in_sitemap[[
+                    'URL', 'Traffic', 'Number of Keywords',
+                    'Search Volume', 'Position Type', 'market'
+                ]],
+                use_container_width=True
+            )
 
-        #### Fonctionnalités :
-        - Analyse de sitemap
-        - Visualisation treemap
-        - Filtrage par niveau
-        - Exclusion par niveau
-        - Analyse SEMrush multi-marchés
+if __name__ == "__main__":
+    st.sidebar.markdown("""
+    ### À propos
+    Cette application analyse la structure des URLs d'un site web à partir de son sitemap.
 
-        #### Guide d'usage des filtres :
+    #### Fonctionnalités :
+    - Analyse de sitemap
+    - Visualisation treemap
+    - Filtrage par niveau
+    - Exclusion par niveau
+    - Analyse SEMrush multi-marchés
 
-        **Nombre max de catégories :**  
-        Limite le nombre de catégories dir_1 à afficher dans l'analyse.  
-        Les catégories sont classées par ordre décroissant du nombre d'URLs.  
-        `-1` = afficher toutes les catégories.
+    #### Guide d'usage des filtres :
 
-        **Configuration des exclusions :**  
-        ⚠️ Important : Pour de meilleurs résultats, évitez d'utiliser des termes d'exclusion différents sur plusieurs niveaux de directory (dir_1, dir_2, dir_3).
-        """)
+    **Nombre max de catégories :**  
+    Limite le nombre de catégories dir_1 à afficher dans l'analyse.  
+    Les catégories sont classées par ordre décroissant du nombre d'URLs.  
+    `-1` = afficher toutes les catégories.
+
+    **Configuration des exclusions :**  
+    ⚠️ Important : Pour de meilleurs résultats, évitez d'utiliser des termes d'exclusion différents sur plusieurs niveaux de directory (dir_1, dir_2, dir_3).
+    """)
