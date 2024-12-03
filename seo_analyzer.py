@@ -101,6 +101,107 @@ def process_semrush_files(files, markets):
     return pd.DataFrame()
 
 
+def create_directory_performance_summary(sitemap_df, semrush_df, dir_1_filter=None, dir_2_filter=None):
+    """Crée un résumé des performances par niveau de directory."""
+    logger.info("Création du résumé des performances par directory")
+
+    summary_dfs = []
+
+    # Analyse niveau 1 (toujours affiché)
+    if dir_1_filter is None:
+        # Compter d'abord le nombre total d'URLs depuis le sitemap
+        sitemap_counts = sitemap_df.groupby('dir_1')['url'].count().reset_index()
+
+        # Calculer les métriques SEMrush par URL unique
+        semrush_metrics = semrush_df.groupby(['dir_1', 'url']).agg({
+            'Traffic': 'sum',
+            'Number of Keywords': 'sum',
+            'Search Volume': 'sum'
+        }).reset_index().groupby('dir_1').sum().drop('url', axis=1).reset_index()
+
+        # Joindre les deux ensembles de données
+        dir_1_summary = sitemap_counts.merge(
+            semrush_metrics,
+            on='dir_1',
+            how='left'
+        ).fillna(0)
+
+        dir_1_summary['Niveau'] = 'Dir_1'
+        dir_1_summary = dir_1_summary.rename(columns={
+            'dir_1': 'Directory',
+            'url': 'Nombre URLs',
+            'Traffic': 'Traffic Total',
+            'Number of Keywords': 'Total Mots-clés',
+            'Search Volume': 'Volume Total'
+        })
+        summary_dfs.append(dir_1_summary)
+
+    # Analyse niveau 2 (si dir_1 est filtré)
+    if dir_1_filter is not None:
+        filtered_sitemap = sitemap_df[sitemap_df['dir_1'] == dir_1_filter]
+        filtered_semrush = semrush_df[semrush_df['dir_1'] == dir_1_filter]
+
+        sitemap_counts = filtered_sitemap.groupby('dir_2')['url'].count().reset_index()
+
+        semrush_metrics = filtered_semrush.groupby(['dir_2', 'url']).agg({
+            'Traffic': 'sum',
+            'Number of Keywords': 'sum',
+            'Search Volume': 'sum'
+        }).reset_index().groupby('dir_2').sum().drop('url', axis=1).reset_index()
+
+        dir_2_summary = sitemap_counts.merge(
+            semrush_metrics,
+            on='dir_2',
+            how='left'
+        ).fillna(0)
+
+        dir_2_summary['Niveau'] = 'Dir_2'
+        dir_2_summary = dir_2_summary.rename(columns={
+            'dir_2': 'Directory',
+            'url': 'Nombre URLs',
+            'Traffic': 'Traffic Total',
+            'Number of Keywords': 'Total Mots-clés',
+            'Search Volume': 'Volume Total'
+        })
+        summary_dfs.append(dir_2_summary)
+
+    # Analyse niveau 3 (si dir_1 et dir_2 sont filtrés)
+    if dir_1_filter is not None and dir_2_filter is not None:
+        filtered_sitemap = sitemap_df[
+            (sitemap_df['dir_1'] == dir_1_filter) &
+            (sitemap_df['dir_2'] == dir_2_filter)
+            ]
+        filtered_semrush = semrush_df[
+            (semrush_df['dir_1'] == dir_1_filter) &
+            (semrush_df['dir_2'] == dir_2_filter)
+            ]
+
+        sitemap_counts = filtered_sitemap.groupby('dir_3')['url'].count().reset_index()
+
+        semrush_metrics = filtered_semrush.groupby(['dir_3', 'url']).agg({
+            'Traffic': 'sum',
+            'Number of Keywords': 'sum',
+            'Search Volume': 'sum'
+        }).reset_index().groupby('dir_3').sum().drop('url', axis=1).reset_index()
+
+        dir_3_summary = sitemap_counts.merge(
+            semrush_metrics,
+            on='dir_3',
+            how='left'
+        ).fillna(0)
+
+        dir_3_summary['Niveau'] = 'Dir_3'
+        dir_3_summary = dir_3_summary.rename(columns={
+            'dir_3': 'Directory',
+            'url': 'Nombre URLs',
+            'Traffic': 'Traffic Total',
+            'Number of Keywords': 'Total Mots-clés',
+            'Search Volume': 'Volume Total'
+        })
+        summary_dfs.append(dir_3_summary)
+
+    return pd.concat(summary_dfs, ignore_index=True)
+
 def fetch_sitemap(url):
     """Récupère le sitemap d'une URL donnée."""
     try:
@@ -310,7 +411,6 @@ def analyze_website(url, custom_sitemap='', max_categories=-1, show_single_items
         logger.info("Analyse terminée avec succès")
         return True
 
-
 # Interface utilisateur
 st.title("📊 SEO Sitemap Analyzer")
 
@@ -476,38 +576,78 @@ if st.session_state.analysis_done:
         }
     )
 
-    # Données SEMrush en pleine largeur également
-    if not st.session_state.semrush_data.empty:
-        st.markdown("### Statistiques SEM Rush")
-        st.dataframe(st.session_state.semrush_data, use_container_width=True)
+# Données SEMrush en pleine largeur également
+if not st.session_state.semrush_data.empty:
+    st.markdown("### Statistiques SEM Rush")
+    st.dataframe(st.session_state.semrush_data, use_container_width=True)
 
-        # Création et affichage du main dataframe
-        st.markdown("### Statistiques URLs SEM Rush")
-        urls_in_sitemap, urls_not_in_sitemap = create_main_dataframe(
-            st.session_state.directories_df,
-            st.session_state.semrush_data
+    # Création et affichage du main dataframe
+    st.markdown("### Statistiques URLs SEM Rush")
+    urls_in_sitemap, urls_not_in_sitemap = create_main_dataframe(
+        st.session_state.directories_df,
+        st.session_state.semrush_data
+    )
+
+    if not urls_in_sitemap.empty:
+        st.dataframe(
+            urls_in_sitemap[[
+                'url', 'dir_1', 'dir_2', 'dir_3', 'Traffic',
+                'Number of Keywords', 'market', 'Search Volume',
+                'Position Type'
+            ]],
+            use_container_width=True
         )
 
-        if not urls_in_sitemap.empty:
-            st.dataframe(
-                urls_in_sitemap[[
-                    'url', 'dir_1', 'dir_2', 'dir_3', 'Traffic',
-                    'Number of Keywords', 'market', 'Search Volume',
-                    'Position Type'
-                ]],
-                use_container_width=True
-            )
+    # Affichage des URLs non présentes dans le sitemap
+    if not urls_not_in_sitemap.empty:
+        st.markdown("### URLs présentes dans SEMrush mais absentes du sitemap")
+        st.dataframe(
+            urls_not_in_sitemap[[
+                'URL', 'Traffic', 'Number of Keywords',
+                'Search Volume', 'Position Type', 'market'
+            ]],
+            use_container_width=True
+        )
 
-        # Affichage des URLs non présentes dans le sitemap
-        if not urls_not_in_sitemap.empty:
-            st.markdown("### URLs présentes dans SEMrush mais absentes du sitemap")
-            st.dataframe(
-                urls_not_in_sitemap[[
-                    'URL', 'Traffic', 'Number of Keywords',
-                    'Search Volume', 'Position Type', 'market'
-                ]],
-                use_container_width=True
+    # Résumé des performances par niveau de directory
+    st.markdown("### Résultats par niveau de page")
+
+    # Filtres pour les niveaux de directory
+    col1, col2 = st.columns(2)
+    with col1:
+        dir_1_options = ['Toutes'] + sorted(urls_in_sitemap['dir_1'].unique().tolist())
+        selected_dir_1 = st.selectbox("Filtrer par Dir_1", dir_1_options, key='perf_dir_1')
+
+    with col2:
+        dir_2_options = ['Toutes']
+        if selected_dir_1 != 'Toutes':
+            dir_2_options += sorted(
+                urls_in_sitemap[urls_in_sitemap['dir_1'] == selected_dir_1]['dir_2'].unique().tolist()
             )
+        selected_dir_2 = st.selectbox("Filtrer par Dir_2", dir_2_options, key='perf_dir_2')
+
+    # Création et affichage du tableau de résumé
+    dir_1_filter = selected_dir_1 if selected_dir_1 != 'Toutes' else None
+    dir_2_filter = selected_dir_2 if selected_dir_2 != 'Toutes' else None
+
+    performance_summary = create_directory_performance_summary(
+        st.session_state.directories_df,  # Données du sitemap
+        urls_in_sitemap,  # Données SEMrush
+        dir_1_filter,
+        dir_2_filter
+    )
+    st.dataframe(
+        performance_summary,
+        use_container_width=True,
+        column_config={
+            "Directory": st.column_config.TextColumn("Directory", width=150),
+            "Niveau": st.column_config.TextColumn("Niveau", width=100),
+            "Nombre URLs": st.column_config.NumberColumn("Nombre URLs", width=120),
+            "Traffic Total": st.column_config.NumberColumn("Traffic Total", width=120),
+            "Total Mots-clés": st.column_config.NumberColumn("Total Mots-clés", width=120),
+            "Volume Total": st.column_config.NumberColumn("Volume Total", width=120)
+        }
+    )
 
 if __name__ == "__main__":
     st.sidebar.markdown("""
