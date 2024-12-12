@@ -136,8 +136,8 @@ def create_directory_performance_summary(sitemap_df, semrush_df, dir_1_filter=No
         })
         summary_dfs.append(dir_1_summary)
 
-    # Analyse niveau 2 (si dir_1 est filtré)
-    if dir_1_filter is not None:
+    # Analyse niveau 2 (si dir_1 est filtré et dir_2 n'est pas filtré)
+    if dir_1_filter is not None and dir_2_filter is None:
         filtered_sitemap = sitemap_df[sitemap_df['dir_1'] == dir_1_filter]
         filtered_semrush = semrush_df[semrush_df['dir_1'] == dir_1_filter]
 
@@ -170,11 +170,11 @@ def create_directory_performance_summary(sitemap_df, semrush_df, dir_1_filter=No
         filtered_sitemap = sitemap_df[
             (sitemap_df['dir_1'] == dir_1_filter) &
             (sitemap_df['dir_2'] == dir_2_filter)
-            ]
+        ]
         filtered_semrush = semrush_df[
             (semrush_df['dir_1'] == dir_1_filter) &
             (semrush_df['dir_2'] == dir_2_filter)
-            ]
+        ]
 
         sitemap_counts = filtered_sitemap.groupby('dir_3')['url'].count().reset_index()
 
@@ -200,7 +200,8 @@ def create_directory_performance_summary(sitemap_df, semrush_df, dir_1_filter=No
         })
         summary_dfs.append(dir_3_summary)
 
-    return pd.concat(summary_dfs, ignore_index=True)
+    result = pd.concat(summary_dfs, ignore_index=True)
+    return result.sort_values(by='Traffic Total', ascending=False).reset_index(drop=True)
 
 def fetch_sitemap(url):
     """Récupère le sitemap d'une URL donnée."""
@@ -636,6 +637,7 @@ if not st.session_state.semrush_data.empty:
         dir_1_filter,
         dir_2_filter
     )
+    # Affichage du tableau principal
     st.dataframe(
         performance_summary,
         use_container_width=True,
@@ -648,6 +650,26 @@ if not st.session_state.semrush_data.empty:
             "Volume Total": st.column_config.NumberColumn("Volume Total", width=120)
         }
     )
+
+    # Calcul et affichage des totaux
+    cols = st.columns(4)
+    cols[0].metric(
+        label="Total nombre d'URLs",
+        value=f"{performance_summary['Nombre URLs'].sum():,}"
+    )
+    cols[1].metric(
+        label="Total traffic",
+        value=f"{performance_summary['Traffic Total'].sum():,}"
+    )
+    cols[2].metric(
+        label="Total mots clés",
+        value=f"{performance_summary['Total Mots-clés'].sum():,}"
+    )
+    cols[3].metric(
+        label="Total volume",
+        value=f"{performance_summary['Volume Total'].sum():,}"
+    )
+
 
 if __name__ == "__main__":
     st.sidebar.markdown("""
