@@ -3,4 +3,3 @@ advertools
 pandas
 plotly
 requests
-cloudscraper

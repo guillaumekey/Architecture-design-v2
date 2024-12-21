@@ -7,8 +7,6 @@ import datetime
 import concurrent.futures
 import logging
 import requests
-import time
-import cloudscraper
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
