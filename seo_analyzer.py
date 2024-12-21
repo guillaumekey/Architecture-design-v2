@@ -208,6 +208,42 @@ def create_directory_performance_summary(sitemap_df, semrush_df, dir_1_filter=No
     result = pd.concat(summary_dfs, ignore_index=True)
     return result.sort_values(by='Traffic Total', ascending=False).reset_index(drop=True)
 
+
+def plot_global_performance(performance_summary):
+    """
+    Visualise la performance globale par catégorie à l'aide d'un Scatter Plot (bulles).
+
+    Args:
+        performance_summary (DataFrame): Résumé des performances par répertoire.
+
+    Returns:
+        None
+    """
+    fig = px.scatter(
+        performance_summary,
+        x="Total Mots-clés",  # Axe X
+        y="Traffic Total",  # Axe Y
+        size="Volume Total",  # Taille des bulles
+        color="Niveau",  # Couleur des bulles
+        hover_name="Directory",  # Nom des bulles au survol
+        title="Performance Globale par Catégorie",
+        labels={
+            "Total Mots-clés": "Nombre de Mots-Clés",
+            "Traffic Total": "Trafic Total",
+            "Volume Total": "Volume Total"
+        }
+    )
+    # Ajuster la mise en page pour une meilleure lisibilité
+    fig.update_layout(
+        xaxis_title="Nombre de Mots-Clés",
+        yaxis_title="Trafic Total",
+        legend_title="Niveau de Catégorie",
+        template="plotly_white"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+
 def fetch_sitemap(url):
     """Récupère et parse le sitemap d'une URL donnée."""
     try:
@@ -751,6 +787,12 @@ if not st.session_state.semrush_data.empty:
         label="Total volume",
         value=f"{performance_summary['Volume Total'].sum():,}"
     )
+
+    # Visualisation avec un Scatter Plot
+    st.markdown("### Analyse de Performance Globale")
+    st.caption(
+        "Ce graphique montre les répertoires principaux avec leurs performances en termes de trafic, mots-clés, et volume de recherche.")
+    plot_global_performance(performance_summary)
 
 
 if __name__ == "__main__":
