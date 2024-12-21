@@ -2,3 +2,5 @@ streamlit
 advertools
 pandas
 plotly
+requests
+cloudscraper
