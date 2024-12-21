@@ -6,6 +6,9 @@ from urllib.parse import urlparse
 import datetime
 import concurrent.futures
 import logging
+import requests
+import time
+import cloudscraper
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -27,6 +30,8 @@ if 'semrush_data' not in st.session_state:
     st.session_state.semrush_data = pd.DataFrame()
 if 'num_semrush_files' not in st.session_state:
     st.session_state.num_semrush_files = 2
+if 'num_custom_sitemaps' not in st.session_state:
+    st.session_state.num_custom_sitemaps = 1
 
 
 def prepare_semrush_data(df):
@@ -204,42 +209,83 @@ def create_directory_performance_summary(sitemap_df, semrush_df, dir_1_filter=No
     return result.sort_values(by='Traffic Total', ascending=False).reset_index(drop=True)
 
 def fetch_sitemap(url):
-    """Récupère le sitemap d'une URL donnée."""
+    """Récupère et parse le sitemap d'une URL donnée."""
     try:
-        logger.info(f"Récupération du sitemap: {url}")
-        sitemap_df = adv.sitemap_to_df(url)
-        logger.info(f"Sitemap récupéré avec succès - {len(sitemap_df)} URLs trouvées")
-        return sitemap_df
+        logger.info(f"Tentative de récupération du sitemap: {url}")
+
+        response = requests.get(url, timeout=30, headers={
+            'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+        })
+
+        if response.status_code != 200:
+            logger.error(f"Impossible de récupérer le sitemap (status code: {response.status_code})")
+            return pd.DataFrame()
+
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'xml' not in content_type:
+            logger.warning(f"Le contenu récupéré n'est pas du XML (type: {content_type})")
+            return pd.DataFrame()
+
+        # Utiliser advertools pour convertir en DataFrame
+        try:
+            sitemap_df = adv.sitemap_to_df(url)
+            if sitemap_df.empty:
+                logger.warning("Aucune URL trouvée dans le sitemap fourni.")
+            else:
+                logger.info(f"Sitemap récupéré avec succès - {len(sitemap_df)} URLs trouvées.")
+            return sitemap_df
+        except Exception as e:
+            logger.error(f"Erreur lors de la conversion du sitemap en DataFrame : {e}")
+            return pd.DataFrame()
+
     except Exception as e:
-        logger.error(f"Erreur lors de la récupération du sitemap {url}: {e}")
-        st.error(f"Erreur lors de la récupération du sitemap {url}: {e}")
+        logger.error(f"Erreur lors de la récupération du sitemap {url} : {e}")
         return pd.DataFrame()
 
 
-def get_sitemap_urls(url, custom_sitemap=''):
-    """Récupère les URLs du sitemap, soit depuis robots.txt, soit depuis un sitemap personnalisé."""
-    logger.info("Début de la récupération des URLs du sitemap")
-    if custom_sitemap:
-        logger.info(f"Utilisation du sitemap personnalisé: {custom_sitemap}")
-        return [custom_sitemap]
+def get_sitemap_urls(url, custom_sitemaps=None):
+    """
+    Récupère les URLs du sitemap, soit depuis robots.txt, soit depuis les sitemaps personnalisés.
+
+    Args:
+        url (str): L'URL de base du site à analyser.
+        custom_sitemaps (list): Liste d'URLs de sitemaps fournis manuellement.
+
+    Returns:
+        tuple: Liste des URLs des sitemaps et un message sur l'origine des sitemaps.
+    """
+    logger.info("Début de la récupération des URLs du sitemap.")
+
+    # Si des sitemaps personnalisés sont fournis, on les utilise directement
+    if custom_sitemaps and any(custom_sitemaps):
+        logger.info(f"Utilisation des sitemaps personnalisés : {custom_sitemaps}")
+        return [sitemap for sitemap in custom_sitemaps if sitemap], "Sitemap fourni manuellement utilisé."
+
     try:
+        # Construction de l'URL du robots.txt
         robots_url = f"{url.rstrip('/')}/robots.txt"
-        logger.info(f"Tentative de lecture du robots.txt: {robots_url}")
+        logger.info(f"Tentative de lecture du robots.txt à : {robots_url}")
+
+        # Utilisation d'advertools pour analyser le fichier robots.txt
         robots_df = adv.robotstxt_to_df(robots_url)
-        sitemap_urls = robots_df[robots_df['directive'].str.contains('Sitemap', case=False)]['content'].tolist()
-        if not sitemap_urls:
-            default_sitemap = f"{url.rstrip('/')}/sitemap.xml"
-            logger.info(f"Aucun sitemap trouvé dans robots.txt, utilisation par défaut: {default_sitemap}")
-            sitemap_urls.append(default_sitemap)
+
+        # Filtrage pour récupérer les directives de type Sitemap
+        sitemap_urls = robots_df[robots_df['directive'].str.contains('sitemap', case=False)]['content'].tolist()
+
+        if sitemap_urls:
+            logger.info(f"Sitemaps trouvés dans robots.txt : {sitemap_urls}")
+            return sitemap_urls, "Sitemaps récupérés depuis robots.txt."
         else:
-            logger.info(f"Sitemaps trouvés dans robots.txt: {sitemap_urls}")
-        return sitemap_urls
+            logger.warning("Aucun sitemap trouvé dans le robots.txt, fallback vers /sitemap.xml")
+            fallback_sitemap = [f"{url.rstrip('/')}/sitemap.xml"]
+            return fallback_sitemap, "Aucun sitemap trouvé dans robots.txt. Utilisation du fallback /sitemap.xml."
+
     except Exception as e:
-        logger.warning(f"Impossible de lire robots.txt: {e}")
-        default_sitemap = f"{url.rstrip('/')}/sitemap.xml"
-        logger.info(f"Utilisation du sitemap par défaut: {default_sitemap}")
-        st.warning(f"Impossible de lire robots.txt, utilisation du sitemap par défaut: {e}")
-        return [default_sitemap]
+        # En cas d'erreur avec le robots.txt, fallback vers le sitemap par défaut
+        logger.warning(f"Erreur lors de la lecture du robots.txt : {e}. Utilisation du fallback.")
+        default_sitemap = [f"{url.rstrip('/')}/sitemap.xml"]
+        return default_sitemap, "Erreur lors de la lecture du robots.txt. Utilisation du fallback /sitemap.xml."
+
 
 
 def get_url_statistics(selected_category='Toutes', selected_subcategory='Toutes', selected_subsubcategory='Toutes'):
@@ -324,8 +370,7 @@ def clean_exclusions(exclusion_string):
     logger.info(f"Exclusions nettoyées: {cleaned}")
     return cleaned
 
-
-def analyze_website(url, custom_sitemap='', max_categories=-1, show_single_items=False, exclusions=None):
+def analyze_website(url, custom_sitemaps=None, max_categories=-1, show_single_items=False, exclusions=None):
     """Analyse un site web à partir de son sitemap avec gestion des exclusions par niveau."""
     logger.info(f"Début de l'analyse du site: {url}")
     if exclusions is None:
@@ -335,8 +380,33 @@ def analyze_website(url, custom_sitemap='', max_categories=-1, show_single_items
     logger.info(f"Domaine extrait: {domain}")
 
     with st.spinner('Récupération des sitemaps...'):
-        sitemap_urls = get_sitemap_urls(url, custom_sitemap)
-        logger.info(f"Sitemaps à analyser: {sitemap_urls}")
+        sitemap_urls, sitemap_message = get_sitemap_urls(url, custom_sitemaps)
+        logger.info(f"Sitemaps à analyser : {sitemap_urls}")
+        st.info(f"🔍 {sitemap_message}")  # Affichage du message
+
+        # Headers avec Googlebot user-agent
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        }
+
+        # Vérification des sitemaps avant traitement
+        for sitemap_url in sitemap_urls:
+            try:
+                response = requests.get(sitemap_url, headers=headers)
+                if response.status_code != 200:
+                    st.error(f"Impossible d'accéder au sitemap {sitemap_url} - Status code: {response.status_code}")
+                    continue
+
+                content_type = response.headers.get('content-type', '')
+                if 'xml' not in content_type.lower():
+                    st.warning(
+                        f"Le sitemap {sitemap_url} n'est peut-être pas au format XML (Content-Type: {content_type})")
+
+                logger.info(f"Contenu du sitemap {sitemap_url}: {response.text[:200]}...")
+            except Exception as e:
+                st.error(f"Erreur lors de l'accès au sitemap {sitemap_url}: {e}")
+                continue
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             sitemaps = list(executor.map(fetch_sitemap, sitemap_urls))
@@ -419,8 +489,20 @@ st.title("📊 SEO Sitemap Analyzer")
 col1, col2 = st.columns(2)
 with col1:
     url = st.text_input("Entrez l'URL du site à analyser:")
-with col2:
-    custom_sitemap = st.text_input("URL du sitemap personnalisé (optionnel):")
+
+# Section des sitemaps personnalisés
+st.subheader("Sitemaps personnalisés (optionnel)")
+
+custom_sitemaps = []
+for i in range(st.session_state.num_custom_sitemaps):
+    custom_sitemap = st.text_input(f"URL du sitemap #{i + 1}", key=f"custom_sitemap_{i}")
+    if custom_sitemap:
+        custom_sitemaps.append(custom_sitemap)
+
+if st.session_state.num_custom_sitemaps < 5:  # Limite à 5 sitemaps max
+    if st.button("+ Ajouter un sitemap"):
+        st.session_state.num_custom_sitemaps += 1
+        st.rerun()
 
 # Options d'analyse
 max_categories = st.number_input("Nombre max de catégories", -1, 100, -1)
@@ -492,7 +574,7 @@ if st.button("Analyser le site"):
             for level, terms in active_exclusions.items():
                 st.write(f"- {level}: {', '.join(terms)}")
 
-        analyze_website(url, custom_sitemap, max_categories, show_single_items, exclusions)
+        analyze_website(url, custom_sitemaps, max_categories, show_single_items, exclusions)
     else:
         logger.error("URL non fournie")
         st.error("Veuillez entrer une URL valide")
