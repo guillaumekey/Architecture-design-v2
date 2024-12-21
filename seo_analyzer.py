@@ -209,39 +209,41 @@ def create_directory_performance_summary(sitemap_df, semrush_df, dir_1_filter=No
     return result.sort_values(by='Traffic Total', ascending=False).reset_index(drop=True)
 
 
-def plot_global_performance(performance_summary):
+def plot_global_performance(performance_summary, x_dimension, y_dimension, size_dimension):
     """
-    Visualise la performance globale par catégorie à l'aide d'un Scatter Plot (bulles).
+    Visualise la performance globale par catégorie avec des dimensions configurables.
 
     Args:
         performance_summary (DataFrame): Résumé des performances par répertoire.
+        x_dimension (str): Nom de la colonne à utiliser pour l'axe X.
+        y_dimension (str): Nom de la colonne à utiliser pour l'axe Y.
+        size_dimension (str): Nom de la colonne à utiliser pour la taille des bulles.
 
     Returns:
         None
     """
     fig = px.scatter(
         performance_summary,
-        x="Total Mots-clés",  # Axe X
-        y="Traffic Total",  # Axe Y
-        size="Volume Total",  # Taille des bulles
-        color="Niveau",  # Couleur des bulles
-        hover_name="Directory",  # Nom des bulles au survol
-        title="Performance Globale par Catégorie",
+        x=x_dimension,
+        y=y_dimension,
+        size=size_dimension,
+        color="Niveau",  # Couleur basée sur le niveau de répertoire
+        hover_name="Directory",  # Nom affiché au survol
+        title=f"Scatter Plot: {x_dimension} vs {y_dimension}",
         labels={
-            "Total Mots-clés": "Nombre de Mots-Clés",
-            "Traffic Total": "Trafic Total",
-            "Volume Total": "Volume Total"
+            x_dimension: x_dimension,
+            y_dimension: y_dimension,
+            size_dimension: size_dimension
         }
     )
-    # Ajuster la mise en page pour une meilleure lisibilité
+    # Mise en forme pour une meilleure lisibilité
     fig.update_layout(
-        xaxis_title="Nombre de Mots-Clés",
-        yaxis_title="Trafic Total",
-        legend_title="Niveau de Catégorie",
+        xaxis_title=x_dimension,
+        yaxis_title=y_dimension,
+        legend_title="Niveau",
         template="plotly_white"
     )
     st.plotly_chart(fig, use_container_width=True)
-
 
 
 def fetch_sitemap(url):
@@ -755,6 +757,7 @@ if not st.session_state.semrush_data.empty:
         dir_1_filter,
         dir_2_filter
     )
+
     # Affichage du tableau principal
     st.dataframe(
         performance_summary,
@@ -788,11 +791,29 @@ if not st.session_state.semrush_data.empty:
         value=f"{performance_summary['Volume Total'].sum():,}"
     )
 
-    # Visualisation avec un Scatter Plot
+    # Affichage du Scatter Plot avec les dimensions sélectionnées
     st.markdown("### Analyse de Performance Globale")
-    st.caption(
-        "Ce graphique montre les répertoires principaux avec leurs performances en termes de trafic, mots-clés, et volume de recherche.")
-    plot_global_performance(performance_summary)
+    # Menu interactif pour sélectionner les dimensions
+    st.markdown("### Configurer le Scatter Plot")
+    col1, col2, col3 = st.columns(3)
+
+    dimension_options = {
+        "Traffic Total": "Traffic Total",
+        "Total Mots-Clés": "Total Mots-clés",
+        "Nombre URLs": "Nombre URLs",
+        "Volume Total": "Volume Total"
+    }
+
+    with col1:
+        x_dimension = st.selectbox("Axe X", options=dimension_options.values(), index=0)
+
+    with col2:
+        y_dimension = st.selectbox("Axe Y", options=dimension_options.values(), index=1)
+
+    with col3:
+        size_dimension = st.selectbox("Taille des bulles", options=dimension_options.values(), index=2)
+
+    plot_global_performance(performance_summary, x_dimension, y_dimension, size_dimension)
 
 
 if __name__ == "__main__":
