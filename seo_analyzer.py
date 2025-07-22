@@ -33,7 +33,7 @@ if 'num_custom_sitemaps' not in st.session_state:
 
 
 def prepare_semrush_data(df):
-    """Agrège les données SEMrush par URL, marché et type de position."""
+    """Agrège les données SEMrush ooooook par URL, marché et type de position."""
     if df.empty:
         return pd.DataFrame()
 
