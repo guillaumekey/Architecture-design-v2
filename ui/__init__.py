@@ -1,0 +1,1 @@
+# Créez ce fichier dans chaque dossier : config/, core/, visualizations/, ui/, utils/

@@ -1,0 +1,1 @@
+# Créez ce fichier dans c# Créez ce fichier dans chaque dossier : config/, core/, visualizations/, ui/, utils/haque dossier : config/, core/, visualizations/, ui/, utils/
